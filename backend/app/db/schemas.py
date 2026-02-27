@@ -31,11 +31,25 @@ class ProjectOut(BaseModel):
     lead_id: int
 
 
+class ProjectCreate(BaseModel):
+    name: str
+    description: str | None = None
+
+
 class TaskPatch(BaseModel):
     status: Literal["BACKLOG", "TODO", "DOING", "DONE"] | None = None
     priority: Literal["LOW", "MEDIUM", "HIGH", "CRITICAL"] | None = None
     assignee_id: int | None = None
     title: str | None = None
+
+
+class TaskCreate(BaseModel):
+    project_id: int
+    title: str
+    status: Literal["BACKLOG", "TODO", "DOING", "DONE"] = "TODO"
+    priority: Literal["LOW", "MEDIUM", "HIGH", "CRITICAL"] = "MEDIUM"
+    assignee_id: int | None = None
+    parent_task_id: int | None = None
 
 
 class TaskOut(BaseModel):

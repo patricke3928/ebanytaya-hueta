@@ -8,15 +8,15 @@ type Props = {
 
 export function ProjectList({ projects, selectedProjectId, onSelect }: Props) {
   return (
-    <aside>
-      <h3>Projects</h3>
-      <ul>
+    <aside className="panel">
+      <h3 className="section-title">Projects</h3>
+      <ul className="project-list">
         {projects.map((project) => (
           <li key={project.id}>
             <button
               type="button"
               onClick={() => onSelect(project.id)}
-              style={{ fontWeight: selectedProjectId === project.id ? 700 : 400 }}
+              className={`project-button ${selectedProjectId === project.id ? "active" : ""}`}
             >
               {project.name}
             </button>

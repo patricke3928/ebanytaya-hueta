@@ -1,0 +1,10 @@
+{
+  "source_directories": [
+    "backend"
+  ],
+  "exclude": [
+    "frontend/node_modules",
+    "frontend/.next"
+  ],
+  "venv": "backend/.venv"
+}

@@ -73,18 +73,32 @@ export default function DashboardPage() {
     return allTasks.filter((task) => task.assignee_id === user.id);
   }, [user, board]);
 
+  const currentProject = projects.find((project) => project.id === selectedProjectId) ?? null;
+
   return (
-    <main style={{ display: "grid", gridTemplateColumns: "280px 1fr 280px", gap: 16 }}>
-      <ProjectList projects={projects} selectedProjectId={selectedProjectId} onSelect={setSelectedProjectId} />
-      <section>
-        <h2>Nexus OS Dashboard</h2>
-        <p>
-          Current user: {user?.username ?? "-"} ({user?.role ?? "-"})
-        </p>
-        <MyTasksWidget tasks={myTasks} />
-        <KanbanBoard board={board} />
-      </section>
-      <NotificationFeed notifications={notifications} />
-    </main>
+    <div className="page">
+      <main className="shell">
+        <ProjectList projects={projects} selectedProjectId={selectedProjectId} onSelect={setSelectedProjectId} />
+
+        <section>
+          <div className="panel top-card">
+            <div>
+              <h1 className="heading">Nexus OS Dashboard</h1>
+              <p className="subtle">
+                {currentProject ? `Project: ${currentProject.name}` : "No project selected"}
+              </p>
+            </div>
+            <span className="pill">
+              {user?.username ?? "-"} / {user?.role ?? "-"}
+            </span>
+          </div>
+
+          <MyTasksWidget tasks={myTasks} />
+          <KanbanBoard board={board} />
+        </section>
+
+        <NotificationFeed notifications={notifications} />
+      </main>
+    </div>
   );
 }

@@ -60,3 +60,37 @@ export async function patchTask(token: string, taskId: number, patch: Partial<Ta
   }
   return res.json();
 }
+
+export async function createProject(token: string, payload: { name: string; description?: string }): Promise<Project> {
+  const res = await fetch(`${API_URL}/api/projects`, {
+    method: "POST",
+    headers: authHeaders(token),
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) {
+    throw new Error("Failed to create project");
+  }
+  return res.json();
+}
+
+export async function createTask(
+  token: string,
+  payload: {
+    project_id: number;
+    title: string;
+    status?: Task["status"];
+    priority?: Task["priority"];
+    assignee_id?: number | null;
+    parent_task_id?: number | null;
+  },
+): Promise<Task> {
+  const res = await fetch(`${API_URL}/api/tasks`, {
+    method: "POST",
+    headers: authHeaders(token),
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) {
+    throw new Error("Failed to create task");
+  }
+  return res.json();
+}
