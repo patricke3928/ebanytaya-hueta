@@ -22,6 +22,14 @@ class UserOut(BaseModel):
     role: Literal["LEAD", "DEV", "PO"]
 
 
+class UserBrief(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    username: str
+    role: Literal["LEAD", "DEV", "PO"]
+
+
 class ProjectOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 

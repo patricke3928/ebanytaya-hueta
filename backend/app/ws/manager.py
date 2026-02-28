@@ -1,6 +1,7 @@
 import asyncio
 from collections import defaultdict
 
+import anyio
 from fastapi import WebSocket
 
 
@@ -18,7 +19,12 @@ class WSManager:
 
     def broadcast_project(self, project_id: int, payload: dict) -> None:
         for ws in list(self.rooms.get(project_id, set())):
-            asyncio.create_task(self._safe_send(project_id, ws, payload))
+            try:
+                asyncio.get_running_loop()
+                asyncio.create_task(self._safe_send(project_id, ws, payload))
+            except RuntimeError:
+                # Called from sync endpoints running in worker threads.
+                anyio.from_thread.run(self._safe_send, project_id, ws, payload)
 
     async def _safe_send(self, project_id: int, websocket: WebSocket, payload: dict) -> None:
         try:

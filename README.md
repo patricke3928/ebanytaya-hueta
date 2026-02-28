@@ -19,6 +19,7 @@ cd backend
 python3 -m venv .venv
 source .venv/bin/activate
 python3 -m pip install -r requirements.txt
+cp .env.example .env
 uvicorn app.main:app --reload --port 8000
 ```
 
@@ -34,8 +35,14 @@ npm run dev
 - `NEXT_PUBLIC_WS_URL=ws://localhost:8000`
 
 ## Demo Login
-The dashboard uses a bootstrap login hardcoded for quick start:
+Use existing seed user from `nexus_os.db`:
 - username: `teamlead_anna`
 - password: `hashed_password_example`
 
-For production, remove demo login from UI and use real auth flow.
+## Tests (Backend)
+```bash
+cd backend
+source .venv/bin/activate
+python3 -m pip install -r requirements-dev.txt
+pytest -q
+```

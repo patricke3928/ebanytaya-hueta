@@ -4,12 +4,13 @@ type Props = {
   projects: Project[];
   selectedProjectId: number | null;
   onSelect: (id: number) => void;
+  title: string;
 };
 
-export function ProjectList({ projects, selectedProjectId, onSelect }: Props) {
+export function ProjectList({ projects, selectedProjectId, onSelect, title }: Props) {
   return (
     <aside className="panel">
-      <h3 className="section-title">Projects</h3>
+      <h3 className="section-title">{title}</h3>
       <ul className="project-list">
         {projects.map((project) => (
           <li key={project.id}>

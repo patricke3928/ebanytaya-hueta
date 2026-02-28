@@ -9,6 +9,7 @@ from app.ws.manager import ws_manager
 
 
 router = APIRouter()
+core_rooms: dict[int, set[WebSocket]] = {}
 
 
 def _get_user_from_token(db: Session, token: str | None) -> User | None:
@@ -42,3 +43,36 @@ async def project_ws(websocket: WebSocket, project_id: int):
         ws_manager.leave(project_id, websocket)
     finally:
         db.close()
+
+
+@router.websocket("/core/sessions/{session_id}")
+async def core_session_ws(websocket: WebSocket, session_id: int):
+    token = websocket.query_params.get("token")
+    db = SessionLocal()
+    user = _get_user_from_token(db, token)
+    db.close()
+
+    if not user:
+        await websocket.close(code=1008)
+        return
+
+    await websocket.accept()
+    room = core_rooms.setdefault(session_id, set())
+    room.add(websocket)
+
+    try:
+        while True:
+            message = await websocket.receive_json()
+            payload = {
+                "type": "core.event",
+                "session_id": session_id,
+                "from_user": user.username,
+                "message": message,
+            }
+            for peer in list(room):
+                try:
+                    await peer.send_json(payload)
+                except Exception:
+                    room.discard(peer)
+    except WebSocketDisconnect:
+        room.discard(websocket)

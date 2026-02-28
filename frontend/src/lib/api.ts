@@ -38,6 +38,14 @@ export async function getProjects(token: string): Promise<Project[]> {
   return res.json();
 }
 
+export async function getUsers(token: string): Promise<Array<Pick<User, "id" | "username" | "role">>> {
+  const res = await fetch(`${API_URL}/api/users`, { headers: authHeaders(token), cache: "no-store" });
+  if (!res.ok) {
+    throw new Error("Failed to fetch users");
+  }
+  return res.json();
+}
+
 export async function getBoard(token: string, projectId: number): Promise<Board> {
   const res = await fetch(`${API_URL}/api/projects/${projectId}/board`, {
     headers: authHeaders(token),
