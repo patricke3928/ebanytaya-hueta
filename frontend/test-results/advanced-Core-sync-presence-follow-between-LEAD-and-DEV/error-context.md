@@ -1,0 +1,141 @@
+# Page snapshot
+
+```yaml
+- generic [active] [ref=e1]:
+  - generic [ref=e4]:
+    - generic [ref=e5]:
+      - paragraph [ref=e6]:
+        - link "← Back to Dashboard" [ref=e7] [cursor=pointer]:
+          - /url: /dashboard
+      - heading "The Core v3 (Monaco + Yjs + Explorer)" [level=1] [ref=e8]
+      - paragraph [ref=e9]: IDE-style workspace with folders, tabs, collaborative cursors, follow mode and run console.
+    - generic [ref=e11]:
+      - textbox "Project ID" [ref=e12]: "4"
+      - textbox "Session name" [ref=e13]: E2E Core 1772245617779
+      - button "Create session" [ref=e14] [cursor=pointer]
+    - generic [ref=e15]:
+      - heading "Sessions" [level=3] [ref=e16]
+      - list [ref=e17]:
+        - listitem [ref=e18]:
+          - paragraph [ref=e19]: "#1 E2E Core 1772245617779"
+          - generic [ref=e20]:
+            - generic [ref=e21]: Project 4
+            - generic [ref=e22]: v1
+          - button "Connected" [ref=e23] [cursor=pointer]
+    - generic [ref=e24]:
+      - navigation [ref=e25]:
+        - generic [ref=e26]:
+          - button "Файловый менеджер" [ref=e27] [cursor=pointer]:
+            - img [ref=e28]
+          - button "Терминал" [ref=e30] [cursor=pointer]:
+            - img [ref=e31]
+          - button "Brain AI" [ref=e33] [cursor=pointer]:
+            - img [ref=e34]
+        - generic [ref=e37]:
+          - generic "Sync v2" [ref=e38]:
+            - img [ref=e39]
+          - button "Настройки" [ref=e43] [cursor=pointer]:
+            - img [ref=e44]
+      - generic [ref=e48]:
+        - generic [ref=e51]:
+          - generic [ref=e52]:
+            - generic [ref=e53]: EXPLORER
+            - generic [ref=e54]:
+              - button "Новый файл" [ref=e55] [cursor=pointer]:
+                - img [ref=e56]
+              - button "Новая папка" [ref=e59] [cursor=pointer]:
+                - img [ref=e60]
+          - generic [ref=e62]:
+            - generic [ref=e63]:
+              - generic [ref=e64] [cursor=pointer]:
+                - img [ref=e66]
+                - img [ref=e68]
+                - generic: src
+              - generic [ref=e70]:
+                - generic [ref=e71] [cursor=pointer]:
+                  - generic: api.ts
+                - generic [ref=e74] [cursor=pointer]:
+                  - generic: index.ts
+            - generic [ref=e77] [cursor=pointer]:
+              - generic: e2e-sync.ts
+            - generic [ref=e80] [cursor=pointer]:
+              - generic: README.md
+        - separator [ref=e83]
+        - generic [ref=e85]:
+          - complementary [ref=e86]:
+            - generic [ref=e87]:
+              - generic [ref=e88]: COLLAB
+              - button "Stop follow" [disabled] [ref=e89] [cursor=pointer]:
+                - img [ref=e90]
+            - generic [ref=e93]:
+              - generic [ref=e94]:
+                - generic [ref=e95]: dev_e2e
+                - button "Follow" [ref=e96] [cursor=pointer]
+              - generic [ref=e97]:
+                - generic [ref=e98]: teamlead_anna
+                - generic [ref=e99]: You
+          - generic [ref=e100]:
+            - generic [ref=e102]:
+              - generic [ref=e103]:
+                - generic [ref=e104]:
+                  - generic [ref=e105]:
+                    - img [ref=e106]
+                    - text: Live Sync
+                  - generic [ref=e109]: "Session #1"
+                  - generic [ref=e110]: Peers 2
+                - generic [ref=e111]:
+                  - generic [ref=e112]:
+                    - generic [ref=e113]: Run Target
+                    - combobox "Run Target" [ref=e114]:
+                      - option "e2e-sync.ts"
+                      - option "src/api.ts"
+                      - option "src/index.ts" [selected]
+                  - button "Snapshot" [ref=e115] [cursor=pointer]
+              - generic [ref=e116]:
+                - generic [ref=e117] [cursor=pointer]:
+                  - img [ref=e118]
+                  - generic [ref=e121]: index.ts
+                  - button [ref=e122]:
+                    - img [ref=e123]
+                - generic [ref=e126] [cursor=pointer]:
+                  - img [ref=e127]
+                  - generic [ref=e130]: e2e-sync.ts
+                  - button [ref=e131]:
+                    - img [ref=e132]
+                - button "Run" [ref=e136] [cursor=pointer]:
+                  - img [ref=e137]
+                  - generic [ref=e139]: Run
+              - generic [ref=e142]: e2e-sync.ts
+              - code [ref=e146]:
+                - generic [ref=e147]:
+                  - textbox "Editor content"
+                  - textbox [ref=e148]
+                  - generic [ref=e153]: "1"
+            - separator
+            - generic [ref=e165]:
+              - generic [ref=e166]:
+                - generic [ref=e168]: TERMINAL
+                - button [ref=e169] [cursor=pointer]:
+                  - img [ref=e170]
+              - generic [ref=e173]:
+                - generic [ref=e174]:
+                  - generic [ref=e175]: ❯
+                  - generic [ref=e176]: "Session #1 created"
+                - generic [ref=e177]:
+                  - generic [ref=e178]: ❯
+                  - generic [ref=e179]: Nexus Runner ready.
+      - contentinfo [ref=e181]:
+        - generic [ref=e182]:
+          - img [ref=e183]
+          - text: Sync · v2
+        - generic [ref=e187]: E2E Core 1772245617779
+        - generic [ref=e188]: e2e-sync.ts
+        - generic [ref=e189]: "Run: src/index.ts"
+        - generic [ref=e190]:
+          - img [ref=e191]
+          - text: Nexus Core
+  - alert [ref=e193]
+  - generic [ref=e194]:
+    - alert
+    - alert
+```

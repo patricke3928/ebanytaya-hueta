@@ -93,7 +93,7 @@ function TaskEditRow({
         <option value="HIGH">{priorityLabels.HIGH}</option>
         <option value="CRITICAL">{priorityLabels.CRITICAL}</option>
       </select>
-      <label className="subtle" style={{ fontSize: 12 }}>
+      <label className="subtle subtle-sm">
         {assigneeText}
       </label>
       <select
@@ -166,7 +166,7 @@ export function KanbanBoard({
                     <span className={`badge ${priorityClass(task.priority)}`}>{priorityLabels[task.priority]}</span>
                   </div>
                   {task.status !== "DONE" ? (
-                    <div className="meta-row" style={{ marginTop: 8 }}>
+                    <div className="meta-row mt-8">
                       {(() => {
                         const blockedByDevRole = currentUserRole === "DEV" && task.assignee_id !== currentUserId;
                         const blockedByPoRole = currentUserRole === "PO";

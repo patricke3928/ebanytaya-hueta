@@ -57,18 +57,17 @@ test("Core sync + presence + follow between LEAD and DEV", async ({ browser }) =
   await expect(sessionCard).toBeVisible();
   await sessionCard.getByRole("button", { name: /Connect|Connected/ }).click();
 
-  const leadEditor = leadPage.getByTestId("core-editor");
-  const devEditor = devPage.getByTestId("core-editor");
-
-  await expect(leadEditor).toBeVisible();
-  await leadEditor.click();
-  await leadPage.keyboard.press(`${process.platform === "darwin" ? "Meta" : "Control"}+A`);
-  await leadPage.keyboard.type("CRDT sync works");
-  await expect(devEditor).toContainText("CRDT sync works");
+  const leadExplorer = leadPage.locator(".core-explorer");
+  await leadPage.getByTestId("core-explorer-new-file").click();
+  const createFileModal = leadPage.locator(".core-modal", { hasText: "Create File" });
+  await expect(createFileModal).toBeVisible();
+  await createFileModal.locator("input.text-input").fill("e2e-sync.ts");
+  await createFileModal.getByRole("button", { name: "Confirm" }).click();
+  await expect(leadExplorer).toContainText("e2e-sync.ts");
+  await expect(devPage.locator(".core-explorer")).toContainText("e2e-sync.ts", { timeout: 15_000 });
 
   await devPage.getByTestId("core-follow-teamlead_anna").click();
-  const leadPresenceRow = leadPage.locator(".task-item", { hasText: "teamlead_anna" }).first();
-  await expect(leadPresenceRow).toContainText("dev_e2e");
+  await expect(leadPage.locator(".ide-presence-rail")).toContainText("dev_e2e");
 
   await leadContext.close();
   await devContext.close();

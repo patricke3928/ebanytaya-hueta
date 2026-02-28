@@ -18,7 +18,7 @@ function priorityClass(priority: Task["priority"]) {
 
 export function MyTasksWidget({ tasks, title, emptyText, statusLabels, priorityLabels }: Props) {
   return (
-    <section className="panel" style={{ marginBottom: 16 }}>
+    <section className="panel mb-16">
       <h3 className="section-title">{title}</h3>
       <ul className="task-list">
         {tasks.map((task) => (

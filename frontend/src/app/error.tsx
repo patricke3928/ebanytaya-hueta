@@ -17,10 +17,10 @@ export default function GlobalError({
   return (
     <div className="page auth-page">
       <section className="panel auth-card">
-        <h1 className="heading" style={{ fontSize: 28 }}>
+        <h1 className="heading auth-heading">
           Something went wrong
         </h1>
-        <p className="subtle" style={{ marginBottom: 12 }}>
+        <p className="subtle auth-subtle">
           Unexpected UI error. You can retry the page or go back to dashboard.
         </p>
         <div className="top-actions">

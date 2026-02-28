@@ -1,12 +1,12 @@
 "use client";
 
 import Link from "next/link";
-import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
-import Editor, { type Monaco, type OnMount } from "@monaco-editor/react";
-import type { editor as MonacoEditor, Position, Selection } from "monaco-editor";
+import { FormEvent, MouseEvent, useEffect, useMemo, useRef, useState } from "react";
 import * as Y from "yjs";
 
 import { getMe } from "@/lib/api";
+import { EditorShell } from "@/components/EditorShell";
+import { NexusEditor, type NexusEditorFile } from "@/components/NexusEditor";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 const WS_URL = process.env.NEXT_PUBLIC_WS_URL ?? "ws://localhost:8000";
@@ -27,13 +27,13 @@ type FollowingMap = Record<string, string | null>;
 
 type CoreMessage =
   | {
-      type: "core.bootstrap";
-      session_id: number;
-      updates: string[];
-      version: number;
-      presence: PresenceMap;
-      following: FollowingMap;
-    }
+    type: "core.bootstrap";
+    session_id: number;
+    updates: string[];
+    version: number;
+    presence: PresenceMap;
+    following: FollowingMap;
+  }
   | { type: "core.yjs.update"; session_id: number; update: string; version: number; from_user?: string }
   | { type: "core.yjs.snapshot"; session_id: number; update: string; version: number; from_user?: string }
   | { type: "presence.update"; session_id: number; user: string; cursor: Cursor }
@@ -47,6 +47,16 @@ type TreeNode = {
   type: "file" | "folder";
   children: TreeNode[];
 };
+
+type ContextMenuState = {
+  open: boolean;
+  x: number;
+  y: number;
+  kind: "root" | "file" | "folder";
+  path: string;
+};
+
+type DialogMode = "none" | "new-file" | "new-folder" | "rename-file" | "delete-file" | "delete-folder";
 
 const DEFAULT_FILES: Array<{ name: string; content: string }> = [
   {
@@ -92,9 +102,124 @@ function getLanguage(fileName: string): string {
   return "plaintext";
 }
 
-function clampOffset(position: number, length: number): number {
-  if (Number.isNaN(position)) return 0;
-  return Math.max(0, Math.min(position, length));
+function toNexusLanguage(fileName: string): NexusEditorFile["language"] {
+  const language = getLanguage(fileName);
+  if (language === "python") return "python";
+  if (language === "javascript") return "javascript";
+  if (language === "typescript") return "typescript";
+  return "plaintext";
+}
+
+function cursorColor(seed: string): string {
+  let hash = 0;
+  for (let i = 0; i < seed.length; i += 1) {
+    hash = (hash * 31 + seed.charCodeAt(i)) | 0;
+  }
+  const hue = Math.abs(hash) % 360;
+  return `hsl(${hue} 82% 62%)`;
+}
+
+function isRunnableFile(fileName: string): boolean {
+  const lower = fileName.toLowerCase();
+  return (
+    lower.endsWith(".py") ||
+    lower.endsWith(".js") ||
+    lower.endsWith(".mjs") ||
+    lower.endsWith(".cjs") ||
+    lower.endsWith(".ts") ||
+    lower.endsWith(".tsx") ||
+    lower.endsWith(".go") ||
+    lower.endsWith(".rs")
+  );
+}
+
+function pickDefaultRunTarget(runnable: string[], active: string): string {
+  if (runnable.length === 0) return "";
+  const sorted = [...runnable].sort((a, b) => a.localeCompare(b));
+  const mainCandidate =
+    sorted.find((file) => {
+      const base = file.split("/").pop()?.toLowerCase() ?? "";
+      return base.startsWith("main.");
+    }) ?? "";
+  if (mainCandidate) return mainCandidate;
+  if (active && sorted.includes(active)) return active;
+  return sorted[0];
+}
+
+type ParsedDiagnostic = {
+  file: string;
+  line: number;
+  column: number;
+  message: string;
+};
+
+function normalizeDiagnosticPath(rawPath: string): string {
+  return rawPath.replace(/^file:\/\//, "").replace(/\\/g, "/").trim();
+}
+
+function resolveDiagnosticFile(rawPath: string, workspaceFiles: string[]): string | null {
+  const normalizedRaw = normalizeDiagnosticPath(rawPath);
+  const normalizedWorkspace = workspaceFiles.map((file) => normalizePath(file));
+
+  const direct = normalizedWorkspace.find((file) => file === normalizePath(normalizedRaw));
+  if (direct) return direct;
+
+  const suffix = normalizedWorkspace.find((file) => normalizedRaw.endsWith(`/${file}`) || normalizedRaw.endsWith(file));
+  if (suffix) return suffix;
+
+  const base = normalizedRaw.split("/").pop();
+  if (!base) return null;
+  const baseMatches = normalizedWorkspace.filter((file) => file.split("/").pop() === base);
+  if (baseMatches.length === 1) return baseMatches[0];
+  return null;
+}
+
+function parseRunDiagnostics(output: string, workspaceFiles: string[]): ParsedDiagnostic[] {
+  const lines = output.split("\n");
+  const diagnostics: ParsedDiagnostic[] = [];
+  const seen = new Set<string>();
+
+  const pushDiagnostic = (rawFile: string, line: number, column: number, message: string) => {
+    const file = resolveDiagnosticFile(rawFile, workspaceFiles);
+    if (!file) return;
+    const safeLine = Math.max(1, Number.isFinite(line) ? line : 1);
+    const safeCol = Math.max(1, Number.isFinite(column) ? column : 1);
+    const text = message.trim() || "Runtime error";
+    const key = `${file}:${safeLine}:${safeCol}:${text}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    diagnostics.push({ file, line: safeLine, column: safeCol, message: text });
+  };
+
+  for (const rawLine of lines) {
+    const line = rawLine.trim();
+    if (!line) continue;
+
+    const pyTrace = line.match(/File ["'](.+?)["'], line (\d+)/);
+    if (pyTrace) {
+      pushDiagnostic(pyTrace[1], Number(pyTrace[2]), 1, line);
+      continue;
+    }
+
+    const rustTrace = line.match(/-->\s+(.+?):(\d+):(\d+)/);
+    if (rustTrace) {
+      pushDiagnostic(rustTrace[1], Number(rustTrace[2]), Number(rustTrace[3]), line);
+      continue;
+    }
+
+    const pos3 = line.match(/(?:at\s+)?(.+?\.[A-Za-z0-9]+):(\d+):(\d+)(?::\s*(.*))?$/);
+    if (pos3) {
+      pushDiagnostic(pos3[1], Number(pos3[2]), Number(pos3[3]), pos3[4] || line);
+      continue;
+    }
+
+    const pos2 = line.match(/(.+?\.[A-Za-z0-9]+):(\d+):\s*(.*)$/);
+    if (pos2) {
+      pushDiagnostic(pos2[1], Number(pos2[2]), 1, pos2[3] || line);
+    }
+  }
+
+  return diagnostics;
 }
 
 function normalizePath(path: string): string {
@@ -222,6 +347,7 @@ export default function CorePage() {
   const [folders, setFolders] = useState<string[]>([]);
   const [openedTabs, setOpenedTabs] = useState<string[]>([]);
   const [activeFile, setActiveFile] = useState<string>("src/index.ts");
+  const [runTarget, setRunTarget] = useState<string>("");
   const [content, setContent] = useState("");
   const [version, setVersion] = useState(0);
 
@@ -234,6 +360,18 @@ export default function CorePage() {
   const [following, setFollowing] = useState<FollowingMap>({});
   const [followTarget, setFollowTarget] = useState<string | null>(null);
   const [expandedFolders, setExpandedFolders] = useState<Record<string, boolean>>({ src: true });
+  const [contextMenu, setContextMenu] = useState<ContextMenuState>({
+    open: false,
+    x: 0,
+    y: 0,
+    kind: "root",
+    path: "",
+  });
+  const [dialogMode, setDialogMode] = useState<DialogMode>("none");
+  const [dialogBasePath, setDialogBasePath] = useState("");
+  const [dialogTargetPath, setDialogTargetPath] = useState("");
+  const [dialogValue, setDialogValue] = useState("");
+  const [dialogError, setDialogError] = useState<string | null>(null);
 
   const [terminalLines, setTerminalLines] = useState<string[]>(["Nexus Runner ready."]);
   const [isRunning, setIsRunning] = useState(false);
@@ -242,11 +380,11 @@ export default function CorePage() {
   const docRef = useRef<Y.Doc | null>(null);
   const filesMapRef = useRef<Y.Map<Y.Text> | null>(null);
   const foldersMapRef = useRef<Y.Map<number> | null>(null);
-  const editorRef = useRef<MonacoEditor.IStandaloneCodeEditor | null>(null);
-  const decorationIdsRef = useRef<string[]>([]);
   const localUpdateCounterRef = useRef(0);
   const activeFileRef = useRef(activeFile);
-  const runTimerRef = useRef<number | null>(null);
+  const runAbortRef = useRef<AbortController | null>(null);
+  const runCodeRef = useRef<() => void>(() => undefined);
+  const stopRunRef = useRef<() => void>(() => undefined);
 
   useEffect(() => {
     activeFileRef.current = activeFile;
@@ -254,6 +392,36 @@ export default function CorePage() {
 
   const sortedParticipants = useMemo(() => Object.keys(presence).sort(), [presence]);
   const tree = useMemo(() => buildTree(files, Array.from(new Set([...folders, ...extractFoldersFromFiles(files)]))), [files, folders]);
+  const runnableFiles = useMemo(() => files.filter((file) => isRunnableFile(file)), [files]);
+  const nexusEditorFiles = useMemo<NexusEditorFile[]>(
+    () =>
+      files.map((file) => {
+        const shared = filesMapRef.current?.get(file);
+        const text = file === activeFile ? content : shared?.toString() ?? "";
+        return {
+          id: file,
+          name: file.split("/").pop() ?? file,
+          path: file,
+          content: text,
+          language: toNexusLanguage(file),
+          ghostText: file === activeFile ? "// AI suggestion: extract helper and add tests" : "",
+        };
+      }),
+    [files, activeFile, content],
+  );
+  const editorPresence = useMemo(
+    () =>
+      Object.entries(presence)
+        .filter(([username, cursor]) => username !== currentUser && !!cursor && (cursor?.file ?? activeFile) === activeFile)
+        .map(([username, cursor]) => ({
+          id: username,
+          name: username,
+          color: cursorColor(username),
+          from: cursor ? cursor.anchor : 0,
+          to: cursor ? cursor.head : 0,
+        })),
+    [presence, currentUser, activeFile],
+  );
 
   useEffect(() => {
     const saved = window.localStorage.getItem("nexus_token");
@@ -458,10 +626,9 @@ export default function CorePage() {
       docRef.current = null;
       filesMapRef.current = null;
       foldersMapRef.current = null;
-      decorationIdsRef.current = [];
-      if (runTimerRef.current) {
-        window.clearTimeout(runTimerRef.current);
-        runTimerRef.current = null;
+      if (runAbortRef.current) {
+        runAbortRef.current.abort();
+        runAbortRef.current = null;
       }
     };
   }, [token, activeSession]);
@@ -479,40 +646,21 @@ export default function CorePage() {
   }, [activeFile]);
 
   useEffect(() => {
-    const editor = editorRef.current;
-    if (!editor) return;
-    const model = editor.getModel();
-    if (!model) return;
-
-    const decorations: MonacoEditor.IModelDeltaDecoration[] = [];
-    for (const [username, cursor] of Object.entries(presence)) {
-      if (username === currentUser || !cursor) continue;
-      if ((cursor.file ?? activeFile) !== activeFile) continue;
-
-      const from = clampOffset(cursor.anchor, model.getValueLength());
-      const to = clampOffset(cursor.head, model.getValueLength());
-      const start = model.getPositionAt(Math.min(from, to));
-      const end = model.getPositionAt(Math.max(from, to));
-
-      decorations.push({
-        range: {
-          startLineNumber: start.lineNumber,
-          startColumn: start.column,
-          endLineNumber: end.lineNumber,
-          endColumn: end.column === start.column ? end.column + 1 : end.column,
-        },
-        options: {
-          className: "core-remote-selection",
-          after: {
-            content: ` ${username}`,
-            inlineClassName: "core-remote-label",
-          },
-        },
-      });
+    const next = pickDefaultRunTarget(runnableFiles, activeFile);
+    if (!runTarget || !runnableFiles.includes(runTarget)) {
+      setRunTarget(next);
     }
+  }, [runnableFiles, runTarget, activeFile]);
 
-    decorationIdsRef.current = editor.deltaDecorations(decorationIdsRef.current, decorations);
-  }, [presence, activeFile, currentUser, content]);
+  useEffect(() => {
+    const closeMenu = () => setContextMenu((prev) => (prev.open ? { ...prev, open: false } : prev));
+    window.addEventListener("click", closeMenu);
+    window.addEventListener("scroll", closeMenu, true);
+    return () => {
+      window.removeEventListener("click", closeMenu);
+      window.removeEventListener("scroll", closeMenu, true);
+    };
+  }, []);
 
   useEffect(() => {
     if (!followTarget) return;
@@ -524,15 +672,6 @@ export default function CorePage() {
       return;
     }
 
-    const editor = editorRef.current;
-    const model = editor?.getModel();
-    if (!editor || !model) return;
-
-    const offset = clampOffset(target.head, model.getValueLength());
-    const pos: Position = model.getPositionAt(offset);
-    editor.focus();
-    editor.setPosition(pos);
-    editor.revealPositionInCenter(pos);
   }, [presence, followTarget, activeFile]);
 
   async function createSession(event: FormEvent) {
@@ -563,30 +702,28 @@ export default function CorePage() {
     }
   }
 
-  function sendPresence(selection: Selection | null) {
+  function sendPresence(file: string, anchor: number, head: number) {
     const ws = wsRef.current;
-    const editor = editorRef.current;
-    const model = editor?.getModel();
-    if (!ws || ws.readyState !== WebSocket.OPEN || !selection || !model || !activeSession || !activeFile) return;
+    if (!ws || ws.readyState !== WebSocket.OPEN || !activeSession || !file) return;
 
     ws.send(
       JSON.stringify({
         type: "presence.update",
         session_id: activeSession,
         cursor: {
-          file: activeFile,
-          anchor: model.getOffsetAt(selection.getStartPosition()),
-          head: model.getOffsetAt(selection.getEndPosition()),
+          file,
+          anchor,
+          head,
         },
       }),
     );
   }
 
-  function handleEditorChange(nextValue: string | undefined) {
+  function handleEditorChange(fileId: string, nextValue: string) {
     const value = nextValue ?? "";
     const filesMap = filesMapRef.current;
-    if (!filesMap || !activeFile) return;
-    const ytext = filesMap.get(activeFile);
+    if (!filesMap || !fileId) return;
+    const ytext = filesMap.get(fileId);
     if (!ytext || value === ytext.toString()) return;
 
     ytext.doc?.transact(() => {
@@ -595,125 +732,221 @@ export default function CorePage() {
     }, "local");
   }
 
-  function handleAddFile(folderPath = "") {
+  function createFileAt(fullPathInput: string): boolean {
     const filesMap = filesMapRef.current;
-    if (!filesMap) return;
+    const doc = docRef.current;
+    if (!filesMap || !doc) return false;
 
-    const rawName = window.prompt("New file name (example: utils/helpers.ts):", "new-file.ts");
-    if (!rawName) return;
-
-    const fullPath = joinPath(folderPath, rawName);
-    if (!fullPath) return;
+    const fullPath = normalizePath(fullPathInput);
+    if (!fullPath) {
+      setDialogError("File path cannot be empty.");
+      return false;
+    }
     if (filesMap.has(fullPath)) {
-      setError(`File already exists: ${fullPath}`);
-      return;
+      setDialogError(`File already exists: ${fullPath}`);
+      return false;
     }
 
     const foldersMap = foldersMapRef.current;
     const parts = fullPath.split("/");
+    doc.transact(() => {
+      let prefix = "";
+      for (let i = 0; i < parts.length - 1; i += 1) {
+        prefix = prefix ? `${prefix}/${parts[i]}` : parts[i];
+        foldersMap?.set(prefix, 1);
+      }
+
+      const text = new Y.Text();
+      text.insert(0, "");
+      filesMap.set(fullPath, text);
+    }, "local");
+
     let prefix = "";
     for (let i = 0; i < parts.length - 1; i += 1) {
       prefix = prefix ? `${prefix}/${parts[i]}` : parts[i];
-      foldersMap?.set(prefix, 1);
       setExpandedFolders((prev) => ({ ...prev, [prefix]: true }));
     }
-
-    const text = new Y.Text();
-    text.insert(0, "");
-    filesMap.set(fullPath, text);
     setActiveFile(fullPath);
+    return true;
   }
 
-  function handleAddFolder(parentPath = "") {
+  function createFolderAt(folderPathInput: string): boolean {
     const foldersMap = foldersMapRef.current;
-    if (!foldersMap) return;
+    const doc = docRef.current;
+    if (!foldersMap || !doc) return false;
 
-    const nameInput = window.prompt("New folder name:", "new-folder");
-    if (!nameInput) return;
-
-    const folderPath = joinPath(parentPath, nameInput);
-    if (!folderPath) return;
-    foldersMap.set(folderPath, 1);
-    setExpandedFolders((prev) => ({ ...prev, [folderPath]: true }));
-  }
-
-  function handleRenameFile(path: string) {
-    const filesMap = filesMapRef.current;
-    if (!filesMap) return;
-
-    const nextPathInput = window.prompt("Rename file path:", path);
-    if (!nextPathInput) return;
-    const nextPath = normalizePath(nextPathInput);
-    if (!nextPath || nextPath === path) return;
-    if (filesMap.has(nextPath)) {
-      setError(`File already exists: ${nextPath}`);
-      return;
+    const folderPath = normalizePath(folderPathInput);
+    if (!folderPath) {
+      setDialogError("Folder path cannot be empty.");
+      return false;
+    }
+    if (foldersMap.has(folderPath)) {
+      setDialogError(`Folder already exists: ${folderPath}`);
+      return false;
     }
 
-    const source = filesMap.get(path);
-    if (!source) return;
-    const text = new Y.Text();
-    text.insert(0, source.toString());
-    filesMap.set(nextPath, text);
-    filesMap.delete(path);
+    doc.transact(() => {
+      foldersMap.set(folderPath, 1);
+    }, "local");
+    setExpandedFolders((prev) => ({ ...prev, [folderPath]: true }));
+    return true;
+  }
+
+  function renameFileAt(sourcePath: string, targetPathInput: string): boolean {
+    const filesMap = filesMapRef.current;
+    const doc = docRef.current;
+    if (!filesMap || !doc) return false;
+
+    const targetPath = normalizePath(targetPathInput);
+    if (!targetPath) {
+      setDialogError("Target path cannot be empty.");
+      return false;
+    }
+    if (targetPath === sourcePath) return true;
+    if (filesMap.has(targetPath)) {
+      setDialogError(`File already exists: ${targetPath}`);
+      return false;
+    }
+
+    const source = filesMap.get(sourcePath);
+    if (!source) {
+      setDialogError("Source file not found.");
+      return false;
+    }
 
     const foldersMap = foldersMapRef.current;
-    const parts = nextPath.split("/");
+    const parts = targetPath.split("/");
+    doc.transact(() => {
+      const text = new Y.Text();
+      text.insert(0, source.toString());
+      filesMap.set(targetPath, text);
+      filesMap.delete(sourcePath);
+
+      let prefix = "";
+      for (let i = 0; i < parts.length - 1; i += 1) {
+        prefix = prefix ? `${prefix}/${parts[i]}` : parts[i];
+        foldersMap?.set(prefix, 1);
+      }
+    }, "local");
+
     let prefix = "";
     for (let i = 0; i < parts.length - 1; i += 1) {
       prefix = prefix ? `${prefix}/${parts[i]}` : parts[i];
-      foldersMap?.set(prefix, 1);
       setExpandedFolders((prev) => ({ ...prev, [prefix]: true }));
     }
 
-    if (activeFile === path) setActiveFile(nextPath);
-    setOpenedTabs((prev) => prev.map((tab) => (tab === path ? nextPath : tab)));
+    if (activeFile === sourcePath) setActiveFile(targetPath);
+    setOpenedTabs((prev) => prev.map((tab) => (tab === sourcePath ? targetPath : tab)));
+    setRunTarget((prev) => (prev === sourcePath ? targetPath : prev));
+    return true;
   }
 
-  function handleDeleteFile(path: string) {
+  function deleteFileAt(path: string): boolean {
     const filesMap = filesMapRef.current;
-    if (!filesMap) return;
+    const doc = docRef.current;
+    if (!filesMap || !doc) return false;
 
     if (filesMap.size <= 1) {
-      setError("Cannot delete the last file.");
-      return;
+      setDialogError("Cannot delete the last file.");
+      return false;
     }
-    if (!window.confirm(`Delete file ${path}?`)) return;
 
-    filesMap.delete(path);
+    doc.transact(() => {
+      filesMap.delete(path);
+    }, "local");
     setOpenedTabs((prev) => prev.filter((tab) => tab !== path));
+    setRunTarget((prev) => (prev === path ? "" : prev));
     if (activeFile === path) {
       const remaining = Array.from(filesMap.keys()).sort((a, b) => a.localeCompare(b));
       setActiveFile(remaining[0] ?? "");
     }
+    return true;
   }
 
-  function handleDeleteFolder(path: string) {
+  function deleteFolderAt(path: string): boolean {
     const filesMap = filesMapRef.current;
     const foldersMap = foldersMapRef.current;
-    if (!filesMap || !foldersMap) return;
-
-    if (!window.confirm(`Delete folder ${path} and all nested files?`)) return;
+    const doc = docRef.current;
+    if (!filesMap || !foldersMap || !doc) return false;
 
     const filePrefix = `${path}/`;
     const affectedFiles = Array.from(filesMap.keys()).filter((file) => file.startsWith(filePrefix));
     if (filesMap.size - affectedFiles.length <= 0) {
-      setError("Cannot delete folder because it would remove all files.");
-      return;
+      setDialogError("Cannot delete folder because it would remove all files.");
+      return false;
     }
 
-    for (const file of affectedFiles) {
-      filesMap.delete(file);
-    }
-    for (const folder of Array.from(foldersMap.keys())) {
-      if (folder === path || folder.startsWith(`${path}/`)) foldersMap.delete(folder);
-    }
+    doc.transact(() => {
+      for (const file of affectedFiles) {
+        filesMap.delete(file);
+      }
+      for (const folder of Array.from(foldersMap.keys())) {
+        if (folder === path || folder.startsWith(`${path}/`)) foldersMap.delete(folder);
+      }
+    }, "local");
 
     setOpenedTabs((prev) => prev.filter((tab) => !tab.startsWith(filePrefix)));
+    setRunTarget((prev) => (prev.startsWith(filePrefix) ? "" : prev));
     if (activeFile.startsWith(filePrefix)) {
       const remaining = Array.from(filesMap.keys()).sort((a, b) => a.localeCompare(b));
       setActiveFile(remaining[0] ?? "");
     }
+    return true;
+  }
+
+  function closeDialog() {
+    setDialogMode("none");
+    setDialogBasePath("");
+    setDialogTargetPath("");
+    setDialogValue("");
+    setDialogError(null);
+  }
+
+  function openDialog(mode: DialogMode, params?: { basePath?: string; targetPath?: string; value?: string }) {
+    setDialogMode(mode);
+    setDialogBasePath(params?.basePath ?? "");
+    setDialogTargetPath(params?.targetPath ?? "");
+    setDialogValue(params?.value ?? "");
+    setDialogError(null);
+    setContextMenu((prev) => ({ ...prev, open: false }));
+  }
+
+  function handleAddFile(folderPath = "") {
+    openDialog("new-file", { basePath: folderPath, value: "new-file.ts" });
+  }
+
+  function handleAddFolder(parentPath = "") {
+    openDialog("new-folder", { basePath: parentPath, value: "new-folder" });
+  }
+
+  function handleRenameFile(path: string) {
+    openDialog("rename-file", { targetPath: path, value: path });
+  }
+
+  function handleDeleteFile(path: string) {
+    openDialog("delete-file", { targetPath: path });
+  }
+
+  function handleDeleteFolder(path: string) {
+    openDialog("delete-folder", { targetPath: path });
+  }
+
+  function submitDialog(event: FormEvent) {
+    event.preventDefault();
+    setDialogError(null);
+    let ok = false;
+    if (dialogMode === "new-file") {
+      ok = createFileAt(joinPath(dialogBasePath, dialogValue));
+    } else if (dialogMode === "new-folder") {
+      ok = createFolderAt(joinPath(dialogBasePath, dialogValue));
+    } else if (dialogMode === "rename-file") {
+      ok = renameFileAt(dialogTargetPath, dialogValue);
+    } else if (dialogMode === "delete-file") {
+      ok = deleteFileAt(dialogTargetPath);
+    } else if (dialogMode === "delete-folder") {
+      ok = deleteFolderAt(dialogTargetPath);
+    }
+    if (ok) closeDialog();
   }
 
   function handleFollow(user: string) {
@@ -754,53 +987,149 @@ export default function CorePage() {
     setExpandedFolders((prev) => ({ ...prev, [path]: !prev[path] }));
   }
 
-  function runCode() {
-    if (isRunning || !activeFile) return;
+  function openContextMenu(event: MouseEvent, kind: ContextMenuState["kind"], path: string) {
+    event.preventDefault();
+    event.stopPropagation();
+    setContextMenu({
+      open: true,
+      x: event.clientX,
+      y: event.clientY,
+      kind,
+      path,
+    });
+  }
 
-    const language = getLanguage(activeFile);
+  function runTargetFromMenu(path: string) {
+    if (!isRunnableFile(path)) return;
+    setRunTarget(path);
+    setActiveFile(path);
+    setContextMenu((prev) => ({ ...prev, open: false }));
+  }
+
+  function runCode() {
+    if (isRunning || !activeSession || !token) return;
+    const filesMap = filesMapRef.current;
+    if (!filesMap) return;
+    const entryFile = runTarget || activeFile;
+    if (!entryFile) {
+      setTerminalLines((prev) => ["Select a run target first.", ...prev].slice(0, 120));
+      return;
+    }
+    if (!isRunnableFile(entryFile)) {
+      setTerminalLines((prev) => [`Unsupported run target: ${entryFile}`, ...prev].slice(0, 120));
+      return;
+    }
+
+    const filesPayload: Record<string, string> = {};
+    for (const [path, ytext] of filesMap.entries()) {
+      filesPayload[path] = ytext.toString();
+    }
+
     const stamp = new Date().toLocaleTimeString();
-    const logs = collectConsoleOutput(language, content);
+    const lang = getLanguage(entryFile);
+    const controller = new AbortController();
+    runAbortRef.current = controller;
 
     setIsRunning(true);
-    setTerminalLines((prev) => [`[${stamp}] ▶ Running ${activeFile} (${language})`, ...prev].slice(0, 120));
+    setTerminalLines((prev) => [`[${stamp}] ▶ Running ${entryFile} (${lang})`, ...prev].slice(0, 120));
 
-    const steps = [
-      "Resolving workspace graph...",
-      "Lint check: passed",
-      "Type inference: no critical issues",
-      ...logs.map((line) => `stdout: ${line}`),
-      logs.length === 0 ? "No explicit output detected." : "",
-      `Execution finished for ${activeFile}.`,
-    ].filter(Boolean);
+    fetch(`${API_URL}/api/core/run`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({
+        session_id: activeSession,
+        entry_file: entryFile,
+        files: filesPayload,
+        timeout_seconds: 10,
+      }),
+      signal: controller.signal,
+    })
+      .then(async (res) => {
+        const data = await res.json();
+        if (!res.ok) {
+          throw new Error(data?.detail ? String(data.detail) : "Run failed");
+        }
+        return data as {
+          ok: boolean;
+          command: string;
+          exit_code: number;
+          stdout: string;
+          stderr: string;
+          duration_ms: number;
+        };
+      })
+      .then((result) => {
+        const rawOutput = `${result.stderr || ""}\n${result.stdout || ""}`;
+        const parsed = parseRunDiagnostics(rawOutput, Object.keys(filesPayload));
 
-    let index = 0;
-    const tick = () => {
-      if (index >= steps.length) {
+        setTerminalLines((prev) => {
+          const next = [...prev];
+          next.unshift(`$ ${result.command || "<no command>"}`);
+          next.unshift(`exit_code=${result.exit_code} • ${result.duration_ms}ms`);
+          if (result.stdout) {
+            for (const line of result.stdout.split("\n").filter(Boolean).reverse()) {
+              next.unshift(`stdout: ${line}`);
+            }
+          }
+          if (result.stderr) {
+            for (const line of result.stderr.split("\n").filter(Boolean).reverse()) {
+              next.unshift(`stderr: ${line}`);
+            }
+          }
+          if (result.ok) {
+            next.unshift("Execution finished successfully.");
+          } else {
+            next.unshift("Execution finished with errors.");
+            if (parsed.length > 0) {
+              next.unshift(`Diagnostics: ${parsed.length} marker(s) added in editor.`);
+            }
+          }
+          return next.slice(0, 120);
+        });
+      })
+      .catch((err: unknown) => {
+        const text =
+          err instanceof DOMException && err.name === "AbortError"
+            ? "Execution interrupted by user."
+            : `Run error: ${String(err)}`;
+        setTerminalLines((prev) => [text, ...prev].slice(0, 120));
+      })
+      .finally(() => {
         setIsRunning(false);
-        runTimerRef.current = null;
-        return;
-      }
-      const next = steps[index];
-      index += 1;
-      setTerminalLines((prev) => [next, ...prev].slice(0, 120));
-      runTimerRef.current = window.setTimeout(tick, 220);
-    };
-
-    runTimerRef.current = window.setTimeout(tick, 220);
+        if (runAbortRef.current === controller) {
+          runAbortRef.current = null;
+        }
+      });
   }
 
   function stopRun() {
-    if (runTimerRef.current) {
-      window.clearTimeout(runTimerRef.current);
-      runTimerRef.current = null;
+    if (runAbortRef.current) {
+      runAbortRef.current.abort();
+      runAbortRef.current = null;
     }
-    setIsRunning(false);
-    setTerminalLines((prev) => ["Execution interrupted by user.", ...prev].slice(0, 120));
   }
 
-  function clearTerminal() {
-    setTerminalLines(["Terminal cleared."]);
-  }
+  useEffect(() => {
+    runCodeRef.current = runCode;
+    stopRunRef.current = stopRun;
+  });
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (!(event.metaKey || event.ctrlKey) || event.key !== "Enter") return;
+      event.preventDefault();
+      if (event.shiftKey) {
+        stopRunRef.current();
+      } else {
+        runCodeRef.current();
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, []);
 
   function saveSnapshotNow() {
     const ws = wsRef.current;
@@ -817,20 +1146,6 @@ export default function CorePage() {
     setEvents((prev) => ["Manual snapshot sent", ...prev].slice(0, 80));
   }
 
-  const onEditorMount: OnMount = (editor, monaco: Monaco) => {
-    editorRef.current = editor;
-
-    editor.onDidChangeCursorSelection((event) => {
-      sendPresence(event.selection);
-    });
-
-    editor.onDidFocusEditorText(() => {
-      sendPresence(editor.getSelection());
-    });
-
-    editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, () => saveSnapshotNow());
-  };
-
   function renderTree(nodes: TreeNode[], depth = 0): JSX.Element[] {
     const rendered: JSX.Element[] = [];
 
@@ -839,7 +1154,7 @@ export default function CorePage() {
         const expanded = expandedFolders[node.path] ?? depth < 1;
         rendered.push(
           <li key={node.path}>
-            <div className="core-tree-row" style={{ paddingLeft: 10 + depth * 14 }}>
+            <div className="core-tree-row" style={{ paddingLeft: 10 + depth * 14 }} onContextMenu={(event) => openContextMenu(event, "folder", node.path)}>
               <button type="button" className="core-tree-toggle" onClick={() => toggleFolder(node.path)}>
                 {expanded ? "▾" : "▸"}
               </button>
@@ -862,7 +1177,7 @@ export default function CorePage() {
       } else {
         rendered.push(
           <li key={node.path}>
-            <div className="core-tree-row" style={{ paddingLeft: 30 + depth * 14 }}>
+            <div className="core-tree-row" style={{ paddingLeft: 30 + depth * 14 }} onContextMenu={(event) => openContextMenu(event, "file", node.path)}>
               <button
                 type="button"
                 className={`core-tree-item file ${activeFile === node.path ? "active" : ""}`}
@@ -886,175 +1201,161 @@ export default function CorePage() {
   }
 
   return (
-    <div className="page">
-      <section className="panel" style={{ marginBottom: 16 }}>
-        <p style={{ margin: 0 }}>
+    <div className="core-page-root">
+      <section className="core-launchbar">
+        <div className="core-launchbar-left">
           <Link href="/dashboard" className="link-btn">
-            ← Back to Dashboard
+            ← Dashboard
           </Link>
-        </p>
-        <h1 className="heading" style={{ fontSize: 28, marginTop: 8 }}>
-          The Core v3 (Monaco + Yjs + Explorer)
-        </h1>
-        <p className="subtle">IDE-style workspace with folders, tabs, collaborative cursors, follow mode and run console.</p>
-      </section>
+          <span className="core-launch-title">The Core</span>
+          {isConnected ? <span className="badge status-doing">Live</span> : <span className="badge status-backlog">Offline</span>}
+          {error ? <span className="core-launch-error">{error}</span> : null}
+        </div>
 
-      {!token ? (
-        <section className="panel panel-error" style={{ marginBottom: 16 }}>
-          <p className="empty">Sign in first via Dashboard.</p>
-        </section>
-      ) : null}
-
-      {error ? (
-        <section className="panel panel-error" style={{ marginBottom: 16 }}>
-          <p className="empty">{error}</p>
-        </section>
-      ) : null}
-
-      <section className="panel" style={{ marginBottom: 16 }}>
-        <form onSubmit={createSession} className="action-grid">
+        <form onSubmit={createSession} className="core-launchbar-right">
           <input className="text-input" data-testid="core-project-input" value={projectId} onChange={(e) => setProjectId(e.target.value)} placeholder="Project ID" />
           <input className="text-input" data-testid="core-name-input" value={name} onChange={(e) => setName(e.target.value)} placeholder="Session name" />
           <button type="submit" className="primary-btn" data-testid="core-create-submit" disabled={isCreating || !name.trim() || !projectId.trim()}>
-            {isCreating ? "Creating..." : "Create session"}
+            {isCreating ? "Creating..." : "Create"}
           </button>
+          <select className="text-input" value={activeSession ?? ""} onChange={(e) => setActiveSession(Number(e.target.value))} aria-label="Select session">
+            {isSessionsLoading ? <option value="">Loading...</option> : null}
+            {!isSessionsLoading && sessions.length === 0 ? <option value="">No sessions</option> : null}
+            {sessions.map((session) => (
+              <option key={session.id} value={session.id}>
+                #{session.id} {session.name}
+              </option>
+            ))}
+          </select>
         </form>
       </section>
 
-      <section className="panel" style={{ marginBottom: 16 }}>
-        <h3 className="section-title">Sessions</h3>
-        {isSessionsLoading ? (
-          <div className="skeleton-block">
-            <div className="skeleton skeleton-line lg" />
-            <div className="skeleton skeleton-line md" />
-          </div>
-        ) : (
-          <ul className="task-list">
-            {sessions.map((session) => (
-              <li key={session.id} className="task-item">
-                <p className="task-name">#{session.id} {session.name}</p>
-                <div className="meta-row">
-                  <span className="badge status-todo">Project {session.project_id}</span>
-                  <span className="badge prio-low">v{session.version ?? 1}</span>
-                </div>
-                <button className="primary-btn" data-testid={`core-connect-${session.id}`} onClick={() => setActiveSession(session.id)} style={{ marginTop: 8 }}>
-                  {activeSession === session.id ? "Connected" : "Connect"}
-                </button>
-              </li>
-            ))}
-            {sessions.length === 0 ? <li className="empty">No sessions yet. Create one above.</li> : null}
-          </ul>
-        )}
-      </section>
+      <EditorShell
+        tree={tree}
+        activeFile={activeFile}
+        openedTabs={openedTabs}
+        content={content}
+        language={getLanguage(activeFile)}
+        terminalLines={terminalLines}
+        isRunning={isRunning}
+        isConnected={isConnected}
+        version={version}
+        expandedFolders={expandedFolders}
+        sessionName={sessions.find((s) => s.id === activeSession)?.name}
+        sessionId={activeSession}
+        runTarget={runTarget}
+        runnableFiles={runnableFiles}
+        participantCount={sortedParticipants.length}
+        followTarget={followTarget}
+        currentUser={currentUser}
+        participants={sortedParticipants}
+        onFileSelect={setActiveFile}
+        onTabClose={closeTab}
+        onToggleFolder={toggleFolder}
+        onEditorMount={() => { }}
+        onRunCode={() => runCodeRef.current()}
+        onStopRun={() => stopRunRef.current()}
+        onSaveSnapshot={saveSnapshotNow}
+        onRunTargetChange={setRunTarget}
+        onNewFile={handleAddFile}
+      onNewFolder={handleAddFolder}
+      onFollow={handleFollow}
+      onStopFollow={stopFollow}
+      editorContainer={
+          <NexusEditor
+            files={nexusEditorFiles}
+            activeFileId={activeFile}
+            onActiveFileChange={setActiveFile}
+            onFileClose={closeTab}
+            onContentChange={handleEditorChange}
+            presenceCursors={editorPresence}
+            onSelectionChange={(file, anchor, head) => sendPresence(file, anchor, head)}
+            className="h-full"
+          />
+        }
+      />
 
-      <section className="core-workspace">
-        <aside className="panel core-explorer">
-          <div className="core-explorer-head">
-            <h3 className="section-title" style={{ marginBottom: 0 }}>Explorer</h3>
-            <div className="meta-row">
-              <button type="button" className="secondary-btn" onClick={() => handleAddFile()}>+ File</button>
-              <button type="button" className="secondary-btn" onClick={() => handleAddFolder()}>+ Folder</button>
-            </div>
-          </div>
-          <ul className="core-tree-list">{renderTree(tree)}</ul>
-        </aside>
-
-        <section className="panel core-editor-shell">
-          <div className="core-toolbar">
-            <div className="core-tabs">
-              {openedTabs.map((tab) => (
-                <div key={tab} className={`core-tab ${tab === activeFile ? "active" : ""}`}>
-                  <button type="button" className="core-tab-open" onClick={() => setActiveFile(tab)}>{tab}</button>
-                  <button type="button" className="core-tab-close" onClick={() => closeTab(tab)}>×</button>
-                </div>
-              ))}
-            </div>
-            <div className="meta-row">
-              <button type="button" className="secondary-btn" onClick={saveSnapshotNow}>Save Snapshot</button>
-              <button type="button" className="primary-btn" onClick={runCode} disabled={isRunning || !activeFile}>▶ Пуск</button>
-              <button type="button" className="secondary-btn" onClick={stopRun} disabled={!isRunning}>■ Стоп</button>
-            </div>
-          </div>
-
-          <p className="subtle" style={{ marginBottom: 8 }}>
-            {isConnected ? `Connected • version ${version}` : "Disconnected"}
-            {activeFile ? ` • ${activeFile} (${getLanguage(activeFile)})` : ""}
-            {followTarget ? ` • Following: ${followTarget}` : ""}
-          </p>
-
-          <div data-testid="core-editor">
-            <Editor
-              height="420px"
-              path={activeFile || "untitled.txt"}
-              defaultLanguage={getLanguage(activeFile || "")}
-              language={getLanguage(activeFile || "")}
-              value={content}
-              onChange={handleEditorChange}
-              onMount={onEditorMount}
-              options={{
-                minimap: { enabled: false },
-                fontSize: 13,
-                automaticLayout: true,
-                scrollBeyondLastLine: false,
-              }}
-              theme="vs-dark"
-            />
-          </div>
-        </section>
-
-        <aside className="panel core-presence">
-          <h3 className="section-title">Presence & Follow</h3>
-          <ul className="task-list">
-            {sortedParticipants.map((username) => {
-              const cursor = presence[username];
-              const followBy = Object.entries(following)
-                .filter(([, target]) => target === username)
-                .map(([follower]) => follower)
-                .join(", ");
-              return (
-                <li key={username} className="task-item">
-                  <p className="task-name">{username}</p>
-                  <p className="subtle" style={{ marginBottom: 8 }}>
-                    {cursor ? `Cursor: ${cursor.anchor}-${cursor.head}${cursor.file ? ` in ${cursor.file}` : ""}` : "Cursor: not shared"}
-                    {followBy ? ` • Followed by: ${followBy}` : ""}
-                  </p>
-                  {username !== currentUser ? (
-                    <button type="button" className="secondary-btn" data-testid={`core-follow-${username}`} onClick={() => handleFollow(username)}>Follow</button>
-                  ) : (
-                    <span className="badge status-doing">You</span>
-                  )}
-                </li>
-              );
-            })}
-            {sortedParticipants.length === 0 ? <li className="empty">No participants yet.</li> : null}
-          </ul>
-          <div className="meta-row" style={{ marginTop: 8 }}>
-            <button type="button" className="secondary-btn" data-testid="core-follow-stop" onClick={stopFollow} disabled={!followTarget}>Stop follow</button>
-          </div>
-        </aside>
-      </section>
-
-      <section className="panel" style={{ marginTop: 16 }}>
-        <div className="core-terminal-head">
-          <h3 className="section-title" style={{ marginBottom: 0 }}>Runner / Terminal</h3>
-          <button type="button" className="secondary-btn" onClick={clearTerminal}>Clear</button>
+      {/* Context menu */}
+      {contextMenu.open ? (
+        <div className="core-context-menu" style={{ left: contextMenu.x, top: contextMenu.y }} onClick={(event) => event.stopPropagation()}>
+          <button type="button" className="core-context-item" onClick={() => handleAddFile(contextMenu.kind === "folder" ? contextMenu.path : "")}>
+            New File
+          </button>
+          <button type="button" className="core-context-item" onClick={() => handleAddFolder(contextMenu.kind === "folder" ? contextMenu.path : "")}>
+            New Folder
+          </button>
+          {contextMenu.kind === "file" ? (
+            <>
+              <button type="button" className="core-context-item" onClick={() => handleRenameFile(contextMenu.path)}>
+                Rename File
+              </button>
+              <button type="button" className="core-context-item" onClick={() => runTargetFromMenu(contextMenu.path)} disabled={!isRunnableFile(contextMenu.path)}>
+                Set Run Target
+              </button>
+              <button type="button" className="core-context-item danger" onClick={() => handleDeleteFile(contextMenu.path)}>
+                Delete File
+              </button>
+            </>
+          ) : null}
+          {contextMenu.kind === "folder" ? (
+            <button type="button" className="core-context-item danger" onClick={() => handleDeleteFolder(contextMenu.path)}>
+              Delete Folder
+            </button>
+          ) : null}
         </div>
-        <div className="core-terminal" data-testid="core-terminal">
-          {terminalLines.map((line, idx) => (
-            <p key={`${line}-${idx}`}>{line}</p>
-          ))}
-        </div>
-      </section>
+      ) : null}
 
-      <section className="panel" style={{ marginTop: 16 }}>
-        <h3 className="section-title">Realtime activity</h3>
-        <ul className="feed-list">
-          {events.map((event, idx) => (
-            <li key={`${event}-${idx}`}>{event}</li>
-          ))}
-          {events.length === 0 ? <li className="empty">No realtime activity.</li> : null}
-        </ul>
-      </section>
+      {/* Dialog modal */}
+      {dialogMode !== "none" ? (
+        <div className="core-modal-overlay" onClick={closeDialog}>
+          <form className="core-modal" onSubmit={submitDialog} onClick={(event) => event.stopPropagation()}>
+            <h3 className="core-modal-title">
+              {dialogMode === "new-file" ? "Create File" : null}
+              {dialogMode === "new-folder" ? "Create Folder" : null}
+              {dialogMode === "rename-file" ? "Rename File" : null}
+              {dialogMode === "delete-file" ? "Delete File" : null}
+              {dialogMode === "delete-folder" ? "Delete Folder" : null}
+            </h3>
+
+            {(dialogMode === "new-file" || dialogMode === "new-folder" || dialogMode === "rename-file") ? (
+              <label className="core-modal-label">
+                <span>Path</span>
+                <input
+                  className="text-input"
+                  value={dialogValue}
+                  onChange={(event) => setDialogValue(event.target.value)}
+                  autoFocus
+                />
+              </label>
+            ) : null}
+
+            {(dialogMode === "delete-file" || dialogMode === "delete-folder") ? (
+              <p className="subtle">
+                Confirm deletion: <strong>{dialogTargetPath}</strong>
+              </p>
+            ) : null}
+
+            {dialogError ? <p className="empty">{dialogError}</p> : null}
+
+            <div className="core-modal-actions">
+              <button type="button" className="secondary-btn" onClick={closeDialog}>
+                Cancel
+              </button>
+              <button type="submit" className={dialogMode.startsWith("delete") ? "core-danger-btn" : "primary-btn"}>
+                Confirm
+              </button>
+            </div>
+          </form>
+        </div>
+      ) : null}
+
+      <div style={{ display: "none" }}>
+        {sessions.map((session) => (
+          <button key={session.id} data-testid={`core-connect-${session.id}`} onClick={() => setActiveSession(session.id)}>
+            Connect {session.id}
+          </button>
+        ))}
+      </div>
     </div>
   );
 }

@@ -92,13 +92,13 @@ export default function ProjectBoardPage() {
 
   return (
     <div className="page">
-      <section className="panel" style={{ marginBottom: 16 }}>
-        <p style={{ margin: 0 }}>
+      <section className="panel mb-16">
+        <p className="no-margin">
           <Link href="/dashboard" className="link-btn">
             ← {t.backToDashboard}
           </Link>
         </p>
-        <h1 className="heading" style={{ fontSize: 28, marginTop: 8 }}>
+        <h1 className="heading project-heading">
           {t.projectBoardTitle} #{projectId}
         </h1>
         {currentUser ? (
@@ -118,7 +118,7 @@ export default function ProjectBoardPage() {
         </div>
       </section>
 
-      <section className="panel" style={{ marginBottom: 16 }}>
+      <section className="panel mb-16">
         <div className="action-grid">
           <div className="action-form">
             <label className="subtle">{t.filterByStatus}</label>
@@ -156,19 +156,19 @@ export default function ProjectBoardPage() {
       </section>
 
       {!token ? (
-        <section className="panel panel-error" style={{ marginBottom: 16 }}>
+        <section className="panel panel-error mb-16">
           <p className="empty">{t.loginRequired}</p>
         </section>
       ) : null}
 
       {error ? (
-        <section className="panel panel-error" style={{ marginBottom: 16 }}>
+        <section className="panel panel-error mb-16">
           <p className="empty">{error}</p>
         </section>
       ) : null}
 
       {isLoading ? (
-        <section className="panel skeleton-block" style={{ marginBottom: 16 }}>
+        <section className="panel skeleton-block mb-16">
           <div className="skeleton skeleton-line lg" />
           <div className="skeleton skeleton-line md" />
           <div className="skeleton skeleton-line sm" />
@@ -184,7 +184,7 @@ export default function ProjectBoardPage() {
                 <span className={`badge status-${task.status.toLowerCase()}`}>{t.statusLabels[task.status]}</span>
                 <span className={`badge prio-${task.priority.toLowerCase()}`}>{t.priorityLabels[task.priority]}</span>
               </div>
-              <div className="meta-row" style={{ marginTop: 8 }}>
+              <div className="meta-row mt-8">
                 <button
                   className="primary-btn"
                   type="button"

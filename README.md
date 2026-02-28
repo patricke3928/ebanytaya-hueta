@@ -46,3 +46,18 @@ source .venv/bin/activate
 python3 -m pip install -r requirements-dev.txt
 pytest -q
 ```
+
+## Core Runner Languages
+The Core `Run` button supports:
+- Python: `.py`
+- JavaScript: `.js`, `.mjs`, `.cjs`
+- TypeScript: `.ts`, `.tsx` (via `tsx` or `deno`)
+- Go: `.go`
+- Rust: `.rs`
+
+### Install All Runtimes (macOS)
+```bash
+cd "/Users/korova/Downloads/ebanytaya hueta"
+chmod +x scripts/setup_runtimes_macos.sh
+./scripts/setup_runtimes_macos.sh
+```

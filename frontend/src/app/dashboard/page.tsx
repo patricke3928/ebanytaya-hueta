@@ -253,10 +253,10 @@ export default function DashboardPage() {
     return (
       <div className="page auth-page">
         <section className="panel auth-card">
-          <h1 className="heading" style={{ fontSize: 28 }}>
+          <h1 className="heading auth-heading">
             {t.loginTitle}
           </h1>
-          <p className="subtle" style={{ marginBottom: 12 }}>
+          <p className="subtle auth-subtle">
             {t.loginSubtitle}
           </p>
           <form onSubmit={handleSignIn} className="action-form">
@@ -273,7 +273,7 @@ export default function DashboardPage() {
               {isAuthLoading ? t.loading : t.signIn}
             </button>
           </form>
-          <div className="lang-switch" aria-label={t.language} style={{ marginTop: 12 }}>
+          <div className="lang-switch mt-12" aria-label={t.language}>
             <button type="button" className={`lang-btn ${lang === "ru" ? "active" : ""}`} onClick={() => setLang("ru")}>
               RU
             </button>
@@ -281,7 +281,7 @@ export default function DashboardPage() {
               EN
             </button>
           </div>
-          {notifications.length > 0 ? <p className="empty" style={{ marginTop: 10 }}>{notifications[0]}</p> : null}
+          {notifications.length > 0 ? <p className="empty mt-10">{notifications[0]}</p> : null}
         </section>
       </div>
     );
@@ -308,7 +308,7 @@ export default function DashboardPage() {
                 {user.role === "LEAD" ? t.roleLeadHint : user.role === "DEV" ? t.roleDevHint : t.rolePoHint}
               </p>
               {selectedProjectId ? (
-                <p style={{ marginTop: 8, marginBottom: 0, display: "flex", gap: 12 }}>
+                <p className="inline-links">
                   <Link href={`/projects/${selectedProjectId}`} className="link-btn">
                     {t.openProjectPage}
                   </Link>
@@ -347,7 +347,7 @@ export default function DashboardPage() {
           </div>
 
           {user.role === "LEAD" ? (
-            <div className="panel" style={{ marginBottom: 16 }}>
+            <div className="panel mb-16">
               <h3 className="section-title">{t.quickActions}</h3>
               <div className="action-grid">
                 <form onSubmit={handleCreateProject} className="action-form">
@@ -398,7 +398,7 @@ export default function DashboardPage() {
           ) : null}
 
           {isWorkspaceLoading ? (
-            <section className="panel skeleton-block" style={{ marginBottom: 16 }}>
+            <section className="panel skeleton-block mb-16">
               <div className="skeleton skeleton-line lg" />
               <div className="skeleton skeleton-line md" />
               <div className="skeleton skeleton-line sm" />
@@ -406,19 +406,19 @@ export default function DashboardPage() {
           ) : null}
 
           {!isWorkspaceLoading && projects.length === 0 ? (
-            <section className="panel" style={{ marginBottom: 16 }}>
+            <section className="panel mb-16">
               <p className="empty">{t.noProjectsHint}</p>
             </section>
           ) : null}
 
           {boardError ? (
-            <section className="panel panel-error" style={{ marginBottom: 16 }}>
+            <section className="panel panel-error mb-16">
               <p className="empty">{boardError}</p>
             </section>
           ) : null}
 
           {isBoardLoading ? (
-            <section className="panel skeleton-block" style={{ marginBottom: 16 }}>
+            <section className="panel skeleton-block mb-16">
               <div className="skeleton skeleton-line lg" />
               <div className="skeleton skeleton-grid">
                 <div className="skeleton skeleton-col" />
