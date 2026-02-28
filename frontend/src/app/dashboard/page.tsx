@@ -1,12 +1,12 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { FormEvent, useEffect, useMemo, useState } from "react";
 
 import { KanbanBoard } from "@/components/dashboard/KanbanBoard";
 import { MyTasksWidget } from "@/components/dashboard/MyTasksWidget";
 import { NotificationFeed } from "@/components/dashboard/NotificationFeed";
 import { ProjectList } from "@/components/dashboard/ProjectList";
-import { getBoard, getMe, getProjects, login } from "@/lib/api";
+import { createProject, createTask, getBoard, getMe, getProjects, login, patchTask } from "@/lib/api";
 import { connectProjectWS } from "@/lib/ws";
 import type { Board, Project, Task, User } from "@/types/domain";
 
@@ -26,6 +26,13 @@ function mergeTask(board: Board | null, nextTask: Task): Board | null {
   return { ...board, columns };
 }
 
+const NEXT_STATUS: Record<Task["status"], Task["status"]> = {
+  BACKLOG: "TODO",
+  TODO: "DOING",
+  DOING: "DONE",
+  DONE: "DONE",
+};
+
 export default function DashboardPage() {
   const [token, setToken] = useState<string>("");
   const [user, setUser] = useState<User | null>(null);
@@ -33,6 +40,11 @@ export default function DashboardPage() {
   const [selectedProjectId, setSelectedProjectId] = useState<number | null>(null);
   const [board, setBoard] = useState<Board | null>(null);
   const [notifications, setNotifications] = useState<string[]>([]);
+  const [busyTaskId, setBusyTaskId] = useState<number | null>(null);
+
+  const [newProjectName, setNewProjectName] = useState("");
+  const [newTaskTitle, setNewTaskTitle] = useState("");
+  const [newTaskPriority, setNewTaskPriority] = useState<Task["priority"]>("MEDIUM");
 
   useEffect(() => {
     (async () => {
@@ -58,9 +70,9 @@ export default function DashboardPage() {
       .catch((err) => setNotifications((prev) => [`Board load failed: ${String(err)}`, ...prev]));
 
     const socket = connectProjectWS(selectedProjectId, token, (message) => {
-      if (message.type === "task.updated") {
+      if (message.type === "task.updated" || message.type === "task.created") {
         setBoard((prev) => mergeTask(prev, message.task as Task));
-        setNotifications((prev) => [`Task #${message.task.id} updated`, ...prev]);
+        setNotifications((prev) => [`Task #${message.task.id} synced`, ...prev]);
       }
     });
 
@@ -74,6 +86,57 @@ export default function DashboardPage() {
   }, [user, board]);
 
   const currentProject = projects.find((project) => project.id === selectedProjectId) ?? null;
+
+  async function handleCreateProject(event: FormEvent) {
+    event.preventDefault();
+    if (!token || !newProjectName.trim() || user?.role !== "LEAD") return;
+
+    try {
+      const project = await createProject(token, { name: newProjectName.trim() });
+      setProjects((prev) => [project, ...prev]);
+      setSelectedProjectId(project.id);
+      setNewProjectName("");
+      setNotifications((prev) => [`Project created: ${project.name}`, ...prev]);
+    } catch (err) {
+      setNotifications((prev) => [`Create project failed: ${String(err)}`, ...prev]);
+    }
+  }
+
+  async function handleCreateTask(event: FormEvent) {
+    event.preventDefault();
+    if (!token || !selectedProjectId || !newTaskTitle.trim() || user?.role !== "LEAD") return;
+
+    try {
+      const task = await createTask(token, {
+        project_id: selectedProjectId,
+        title: newTaskTitle.trim(),
+        priority: newTaskPriority,
+        status: "TODO",
+      });
+      setBoard((prev) => mergeTask(prev, task));
+      setNewTaskTitle("");
+      setNotifications((prev) => [`Task created: #${task.id}`, ...prev]);
+    } catch (err) {
+      setNotifications((prev) => [`Create task failed: ${String(err)}`, ...prev]);
+    }
+  }
+
+  async function handleMoveTask(task: Task) {
+    if (!token) return;
+    const nextStatus = NEXT_STATUS[task.status];
+    if (nextStatus === task.status) return;
+
+    setBusyTaskId(task.id);
+    try {
+      const updated = await patchTask(token, task.id, { status: nextStatus });
+      setBoard((prev) => mergeTask(prev, updated));
+      setNotifications((prev) => [`Task #${task.id} -> ${nextStatus}`, ...prev]);
+    } catch (err) {
+      setNotifications((prev) => [`Move failed for #${task.id}: ${String(err)}`, ...prev]);
+    } finally {
+      setBusyTaskId(null);
+    }
+  }
 
   return (
     <div className="page">
@@ -93,8 +156,57 @@ export default function DashboardPage() {
             </span>
           </div>
 
+          {user?.role === "LEAD" ? (
+            <div className="panel" style={{ marginBottom: 16 }}>
+              <h3 className="section-title">Quick Actions</h3>
+              <div className="action-grid">
+                <form onSubmit={handleCreateProject} className="action-form">
+                  <label className="subtle">Create project</label>
+                  <input
+                    className="text-input"
+                    value={newProjectName}
+                    onChange={(event) => setNewProjectName(event.target.value)}
+                    placeholder="Project name"
+                  />
+                  <button className="primary-btn" type="submit">
+                    Add Project
+                  </button>
+                </form>
+
+                <form onSubmit={handleCreateTask} className="action-form">
+                  <label className="subtle">Create task in current project</label>
+                  <input
+                    className="text-input"
+                    value={newTaskTitle}
+                    onChange={(event) => setNewTaskTitle(event.target.value)}
+                    placeholder="Task title"
+                  />
+                  <select
+                    className="text-input"
+                    value={newTaskPriority}
+                    onChange={(event) => setNewTaskPriority(event.target.value as Task["priority"])}
+                  >
+                    <option value="LOW">LOW</option>
+                    <option value="MEDIUM">MEDIUM</option>
+                    <option value="HIGH">HIGH</option>
+                    <option value="CRITICAL">CRITICAL</option>
+                  </select>
+                  <button className="primary-btn" type="submit" disabled={!selectedProjectId}>
+                    Add Task
+                  </button>
+                </form>
+              </div>
+            </div>
+          ) : null}
+
           <MyTasksWidget tasks={myTasks} />
-          <KanbanBoard board={board} />
+          <KanbanBoard
+            board={board}
+            currentUserId={user?.id ?? null}
+            currentUserRole={user?.role ?? null}
+            onMoveTask={handleMoveTask}
+            busyTaskId={busyTaskId}
+          />
         </section>
 
         <NotificationFeed notifications={notifications} />

@@ -181,6 +181,40 @@ button {
   color: var(--muted);
 }
 
+.action-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+.action-form {
+  display: grid;
+  gap: 8px;
+}
+
+.text-input {
+  width: 100%;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: #fff;
+  padding: 9px 10px;
+  color: var(--text);
+}
+
+.primary-btn {
+  border: 1px solid #00525a;
+  background: var(--accent);
+  color: #fff;
+  border-radius: 10px;
+  padding: 8px 12px;
+  cursor: pointer;
+}
+
+.primary-btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
 @keyframes fade-in {
   from {
     opacity: 0;
@@ -200,6 +234,10 @@ button {
 
 @media (max-width: 840px) {
   .kanban-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .action-grid {
     grid-template-columns: 1fr;
   }
 }
