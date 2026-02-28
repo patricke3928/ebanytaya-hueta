@@ -168,8 +168,10 @@ export default function ProjectBoardPage() {
       ) : null}
 
       {isLoading ? (
-        <section className="panel" style={{ marginBottom: 16 }}>
-          <p className="empty">{t.loadingBoard}</p>
+        <section className="panel skeleton-block" style={{ marginBottom: 16 }}>
+          <div className="skeleton skeleton-line lg" />
+          <div className="skeleton skeleton-line md" />
+          <div className="skeleton skeleton-line sm" />
         </section>
       ) : null}
 

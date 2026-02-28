@@ -176,6 +176,7 @@ export function KanbanBoard({
                           <button
                             type="button"
                             className="primary-btn"
+                            data-testid={`move-task-${task.id}`}
                             onClick={() => onMoveTask(task)}
                             disabled={disabled}
                             title={reason}

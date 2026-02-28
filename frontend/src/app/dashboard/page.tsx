@@ -1,8 +1,9 @@
 "use client";
 
 import Link from "next/link";
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 
+import { ToastStack, type ToastTone } from "@/components/common/ToastStack";
 import { KanbanBoard } from "@/components/dashboard/KanbanBoard";
 import { MyTasksWidget } from "@/components/dashboard/MyTasksWidget";
 import { NotificationFeed } from "@/components/dashboard/NotificationFeed";
@@ -44,6 +45,7 @@ export default function DashboardPage() {
   const [selectedProjectId, setSelectedProjectId] = useState<number | null>(null);
   const [board, setBoard] = useState<Board | null>(null);
   const [notifications, setNotifications] = useState<string[]>([]);
+  const [toasts, setToasts] = useState<Array<{ id: number; message: string; tone: ToastTone; count: number }>>([]);
   const [busyTaskId, setBusyTaskId] = useState<number | null>(null);
   const [isAuthLoading, setIsAuthLoading] = useState(false);
   const [isWorkspaceLoading, setIsWorkspaceLoading] = useState(false);
@@ -56,6 +58,27 @@ export default function DashboardPage() {
 
   const [username, setUsername] = useState("teamlead_anna");
   const [password, setPassword] = useState("hashed_password_example");
+
+  const pushNotification = useCallback((message: string, tone: ToastTone = "info") => {
+    setNotifications((prev) => [message, ...prev].slice(0, 40));
+    setToasts((prev) => {
+      const existing = prev.find((item) => item.message === message && item.tone === tone);
+      if (existing) {
+        return prev
+          .map((item) =>
+            item.id === existing.id ? { ...item, count: Math.min((item.count ?? 1) + 1, 99), id: Date.now() } : item,
+          )
+          .sort((a, b) => b.id - a.id)
+          .slice(0, 4);
+      }
+      const toastId = Date.now() + Math.floor(Math.random() * 1000);
+      return [{ id: toastId, message, tone, count: 1 }, ...prev].slice(0, 4);
+    });
+  }, []);
+
+  const dismissToast = useCallback((id: number) => {
+    setToasts((prev) => prev.filter((item) => item.id !== id));
+  }, []);
 
   useEffect(() => {
     const savedLang = window.localStorage.getItem("nexus_lang");
@@ -92,7 +115,7 @@ export default function DashboardPage() {
         setSelectedProjectId(projectList[0].id);
       }
     })().catch((err) => {
-      setNotifications((prev) => [`${t.startupFailed}: ${String(err)}`, ...prev]);
+      pushNotification(`${t.startupFailed}: ${String(err)}`, "error");
       setToken("");
       window.localStorage.removeItem("nexus_token");
     }).finally(() => {
@@ -100,7 +123,7 @@ export default function DashboardPage() {
     });
     // selectedProjectId is intentionally excluded to avoid refetch loops.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [token, t.startupFailed]);
+  }, [token, t.startupFailed, pushNotification]);
 
   useEffect(() => {
     if (!token || !selectedProjectId) return;
@@ -111,7 +134,7 @@ export default function DashboardPage() {
       .then(setBoard)
       .catch((err) => {
         setBoardError(`${t.boardLoadFailed}: ${String(err)}`);
-        setNotifications((prev) => [`${t.boardLoadFailed}: ${String(err)}`, ...prev]);
+        pushNotification(`${t.boardLoadFailed}: ${String(err)}`, "error");
       })
       .finally(() => {
         setIsBoardLoading(false);
@@ -120,12 +143,12 @@ export default function DashboardPage() {
     const socket = connectProjectWS(selectedProjectId, token, (message) => {
       if (message.type === "task.updated" || message.type === "task.created") {
         setBoard((prev) => mergeTask(prev, message.task as Task));
-        setNotifications((prev) => [`${t.taskSynced}: #${message.task.id}`, ...prev]);
+        pushNotification(`${t.taskSynced}: #${message.task.id}`, "info");
       }
     });
 
     return () => socket.close();
-  }, [token, selectedProjectId, t.boardLoadFailed, t.taskSynced]);
+  }, [token, selectedProjectId, t.boardLoadFailed, t.taskSynced, pushNotification]);
 
   const myTasks = useMemo(() => {
     if (!user || !board) return [];
@@ -143,8 +166,9 @@ export default function DashboardPage() {
       setToken(accessToken);
       window.localStorage.setItem("nexus_token", accessToken);
       setNotifications([]);
+      setToasts([]);
     } catch (err) {
-      setNotifications([`${t.loginFailed}: ${String(err)}`]);
+      pushNotification(`${t.loginFailed}: ${String(err)}`, "error");
     } finally {
       setIsAuthLoading(false);
     }
@@ -169,9 +193,9 @@ export default function DashboardPage() {
       setProjects((prev) => [project, ...prev]);
       setSelectedProjectId(project.id);
       setNewProjectName("");
-      setNotifications((prev) => [`${t.projectCreated}: ${project.name}`, ...prev]);
+      pushNotification(`${t.projectCreated}: ${project.name}`, "success");
     } catch (err) {
-      setNotifications((prev) => [`${t.createProjectFailed}: ${String(err)}`, ...prev]);
+      pushNotification(`${t.createProjectFailed}: ${String(err)}`, "error");
     }
   }
 
@@ -188,9 +212,9 @@ export default function DashboardPage() {
       });
       setBoard((prev) => mergeTask(prev, task));
       setNewTaskTitle("");
-      setNotifications((prev) => [`${t.taskCreated}: #${task.id}`, ...prev]);
+      pushNotification(`${t.taskCreated}: #${task.id}`, "success");
     } catch (err) {
-      setNotifications((prev) => [`${t.createTaskFailed}: ${String(err)}`, ...prev]);
+      pushNotification(`${t.createTaskFailed}: ${String(err)}`, "error");
     }
   }
 
@@ -203,9 +227,9 @@ export default function DashboardPage() {
     try {
       const updated = await patchTask(token, task.id, { status: nextStatus });
       setBoard((prev) => mergeTask(prev, updated));
-      setNotifications((prev) => [`#${task.id}: ${t.moveTo} ${t.statusLabels[nextStatus]}`, ...prev]);
+      pushNotification(`#${task.id}: ${t.moveTo} ${t.statusLabels[nextStatus]}`, "success");
     } catch (err) {
-      setNotifications((prev) => [`${t.moveFailed} #${task.id}: ${String(err)}`, ...prev]);
+      pushNotification(`${t.moveFailed} #${task.id}: ${String(err)}`, "error");
     } finally {
       setBusyTaskId(null);
     }
@@ -217,9 +241,9 @@ export default function DashboardPage() {
     try {
       const updated = await patchTask(token, task.id, patch);
       setBoard((prev) => mergeTask(prev, updated));
-      setNotifications((prev) => [`${t.updateTask}: #${task.id}`, ...prev]);
+      pushNotification(`${t.updateTask}: #${task.id}`, "success");
     } catch (err) {
-      setNotifications((prev) => [`${t.moveFailed} #${task.id}: ${String(err)}`, ...prev]);
+      pushNotification(`${t.moveFailed} #${task.id}: ${String(err)}`, "error");
     } finally {
       setBusyTaskId(null);
     }
@@ -245,7 +269,7 @@ export default function DashboardPage() {
               value={password}
               onChange={(event) => setPassword(event.target.value)}
             />
-            <button className="primary-btn" type="submit" disabled={isAuthLoading}>
+            <button className="primary-btn" data-testid="login-submit" type="submit" disabled={isAuthLoading}>
               {isAuthLoading ? t.loading : t.signIn}
             </button>
           </form>
@@ -330,11 +354,12 @@ export default function DashboardPage() {
                   <label className="subtle">{t.createProject}</label>
                   <input
                     className="text-input"
+                    data-testid="create-project-input"
                     value={newProjectName}
                     onChange={(event) => setNewProjectName(event.target.value)}
                     placeholder={t.projectName}
                   />
-                  <button className="primary-btn" type="submit" disabled={!newProjectName.trim()}>
+                  <button className="primary-btn" data-testid="create-project-submit" type="submit" disabled={!newProjectName.trim()}>
                     {t.addProject}
                   </button>
                 </form>
@@ -343,6 +368,7 @@ export default function DashboardPage() {
                   <label className="subtle">{t.createTaskCurrentProject}</label>
                   <input
                     className="text-input"
+                    data-testid="create-task-input"
                     value={newTaskTitle}
                     onChange={(event) => setNewTaskTitle(event.target.value)}
                     placeholder={t.taskTitle}
@@ -359,6 +385,7 @@ export default function DashboardPage() {
                   </select>
                   <button
                     className="primary-btn"
+                    data-testid="create-task-submit"
                     type="submit"
                     disabled={!selectedProjectId || !newTaskTitle.trim()}
                     title={!selectedProjectId ? t.projectRequiredHint : ""}
@@ -371,8 +398,10 @@ export default function DashboardPage() {
           ) : null}
 
           {isWorkspaceLoading ? (
-            <section className="panel" style={{ marginBottom: 16 }}>
-              <p className="empty">{t.loadingWorkspace}</p>
+            <section className="panel skeleton-block" style={{ marginBottom: 16 }}>
+              <div className="skeleton skeleton-line lg" />
+              <div className="skeleton skeleton-line md" />
+              <div className="skeleton skeleton-line sm" />
             </section>
           ) : null}
 
@@ -389,8 +418,14 @@ export default function DashboardPage() {
           ) : null}
 
           {isBoardLoading ? (
-            <section className="panel" style={{ marginBottom: 16 }}>
-              <p className="empty">{t.loadingBoard}</p>
+            <section className="panel skeleton-block" style={{ marginBottom: 16 }}>
+              <div className="skeleton skeleton-line lg" />
+              <div className="skeleton skeleton-grid">
+                <div className="skeleton skeleton-col" />
+                <div className="skeleton skeleton-col" />
+                <div className="skeleton skeleton-col" />
+                <div className="skeleton skeleton-col" />
+              </div>
             </section>
           ) : null}
 
@@ -428,6 +463,7 @@ export default function DashboardPage() {
 
         <NotificationFeed notifications={notifications} title={t.notifications} emptyText={t.noRecentEvents} />
       </main>
+      <ToastStack items={toasts} onDismiss={dismissToast} />
     </div>
   );
 }
